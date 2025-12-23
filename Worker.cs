@@ -16,7 +16,6 @@ namespace pr_9_permilko
         TelegramBotClient TelegramBotClient;
         List<Users> Users = new List<Users>();
         Timer Timer;
-
         List<string> Messages = new List<string>()
         {
             "3дравствуйте!" +
@@ -38,10 +37,6 @@ namespace pr_9_permilko
             "Все события удалены."
         };
         private readonly ILogger<Worker> _logger;
-        
-
-        
-
         public Worker(ILogger<Worker> logger)
         {
             _logger = logger;
@@ -186,6 +181,20 @@ namespace pr_9_permilko
             CancellationToken token)
         {
             Console.WriteLine("Ошибка: " + exception.Message);
+        }
+
+        public async void Tick(object obj)
+        {
+            string TimeNow = DateTime.Now.ToString("HH:mm dd.MM.yyyy");
+            foreach (Users User in Users)
+                for (int i = 0; i < User.Events.Count; i++)
+                {
+                    if (User.Events[i].Time.ToString("HH:mm dd.MM.yyyy") != TimeNow) continue;
+                    await TelegramBotClient.SendMessage(
+                        User.IdUser,
+                        "Напоминание: " + User.Events[i].Message ); 
+                    User.Events.Remove(User.Events[i]);
+                }
         }
     }
 }
