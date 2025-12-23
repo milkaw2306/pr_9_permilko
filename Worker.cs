@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using Microsoft.Extensions.Logging;
 using Microsoft.VisualBasic;
 using pr_9_permilko.Classes;
@@ -195,6 +196,19 @@ namespace pr_9_permilko
                         "Напоминание: " + User.Events[i].Message ); 
                     User.Events.Remove(User.Events[i]);
                 }
+        }
+
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        {  
+            TelegramBotClient = new TelegramBotClient(Token);
+            TelegramBotClient.StartReceiving(
+                HandleUpdateAsync,
+                HandleErrorAsync,
+                null,
+                new CancellationTokenSource().Token
+            );
+            TimerCallback TimerCalback = new TimerCallback(Tick);
+            Timer = new Timer(TimerCalback, 0, 0, 60 * 1000);
         }
     }
 }
