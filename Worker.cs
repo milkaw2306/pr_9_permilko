@@ -1,7 +1,7 @@
 using System;
 using System.Threading;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.VisualBasic;
 using pr_9_permilko.Classes;
 using Telegram.Bot;
 using Telegram.Bot.Polling;
@@ -13,7 +13,7 @@ namespace pr_9_permilko
 {
     public class Worker : BackgroundService
     {
-        readonly string Token = "полученный телеграмм токен";
+        readonly string Token = "8573960421:AAEchbTqTb0-qdxeP_VfLZVeaXHED3lljqk";
         TelegramBotClient TelegramBotClient;
         List<Users> Users = new List<Users>();
         Timer Timer;
@@ -42,9 +42,17 @@ namespace pr_9_permilko
         {
             _logger = logger;
         }
-
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
+            TelegramBotClient = new TelegramBotClient(Token);
+            TelegramBotClient.StartReceiving(
+                HandleUpdateAsync,
+                HandleErrorAsync,
+                null,
+                stoppingToken
+            );
+            TimerCallback TimerCalback = new TimerCallback(Tick);
+            Timer = new Timer(TimerCalback, 0, 0, 60 * 1000);
             while (!stoppingToken.IsCancellationRequested)
             {
                 if (_logger.IsEnabled(LogLevel.Information))
@@ -53,8 +61,8 @@ namespace pr_9_permilko
                 }
                 await Task.Delay(1000, stoppingToken);
             }
+            Timer?.Dispose();
         }
-
         public bool CheckFormatDateTime(string value, out DateTime time)
         {
             return DateTime.TryParse(value, out time);
@@ -71,65 +79,83 @@ namespace pr_9_permilko
                 }
             };
         }
-        public static InlineKeyboardMarkup DeleteEvent(string Message){
-        List<InlineKeyboardButton> inlineKeyboards = new List<InlineKeyboardButton>();
-        inlineKeyboards.Add(new InlineKeyboardButton("Удалить", Message));
-            return new InlineKeyboardMarkup(inlineKeyboards);
-
-        }
-        public async void SendMessage(long chatId, int typeMessage)
+        public static InlineKeyboardMarkup DeleteEvent(string Message)
         {
-            if (typeMessage != 3){
+            List<InlineKeyboardButton> inlineKeyboards = new List<InlineKeyboardButton>();
+            inlineKeyboards.Add(new InlineKeyboardButton("Удалить", Message));
+            return new InlineKeyboardMarkup(inlineKeyboards);
+        }
+        public async Task SendMessage(long chatId, int typeMessage)
+        {
+            if (typeMessage != 3)
+            {
                 await TelegramBotClient.SendMessage(
-                chatId,
-                Messages[typeMessage],
-                ParseMode.Html, 
-                replyMarkup: GetButtons());
+                    chatId,
+                    Messages[typeMessage],
+                    ParseMode.Html,
+                    replyMarkup: GetButtons());
             }
             else if (typeMessage == 3)
+            {
                 await TelegramBotClient.SendMessage(
                     chatId,
                     $"Указанное вами время и дата не могут быть установлены, " +
                     $"потому-что сейчас уже: {DateTime.Now.ToString("HH.mm dd.MM.уууу")} ");
-        }
-        public async void Command(long chatId, string command){
-            if (command.ToLower() == "/start") SendMessage(chatId, 0);
-            else if (command.ToLower() == "/create_task") SendMessage(chatId, 1);
-            else if (command.ToLower() == "/list_tasks")
-            {
-                Users User = Users.Find(x => x.IdUser == chatId);
-                if (User == null) SendMessage(chatId, 4);
-                else if (User.Events.Count == 0) SendMessage(chatId, 4);
-                else
-                {
-                    foreach (Events Event in User.Events)
-                    {
-                        await TelegramBotClient.SendMessage(
-                            chatId,
-                            $"Уведомить пользователя: {Event.Time.ToString("HH: mm dd: MM:yyyy")}" +
-                            $"\nСообщение: {Event.Message}",
-                            replyMarkup: DeleteEvent(Event.Message)
-                        );
-                    }
-                }
             }
         }
 
+        public async Task Command(long chatId, string command)
+        {
+            try
+            {
+                if (command.ToLower() == "/start")
+                    await SendMessage(chatId, 0);
+                else if (command.ToLower() == "/create_task")
+                    await SendMessage(chatId, 1);
+                else if (command.ToLower() == "/list_tasks")
+                {
+                    Users User = Users.Find(x => x.IdUser == chatId);
+                    if (User == null || User.Events.Count == 0)
+                    {
+                        await SendMessage(chatId, 4);
+                    }
+                    else
+                    {
+                        foreach (Events Event in User.Events)
+                        {
+                            await TelegramBotClient.SendMessage(
+                                chatId,
+                                $"Уведомить пользователя: {Event.Time.ToString("HH:mm dd.MM.yyyy")}" +
+                                $"\nСообщение: {Event.Message}",
+                                replyMarkup: DeleteEvent(Event.Message));
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Ошибка выполнения команды: {ex.Message}");
+            }
+        }
         private void GetMessages(Message message)
         {
             Console.WriteLine("Получено сообщение: " + message.Text + " от пользователя: " + message.Chat.Username);
             long IdUser = message.Chat.Id;
             string MessageUser = message.Text;
-            if (message.Text.Contains("/")) Command(message.Chat.Id, message.Text);
+
+            if (message.Text.Contains("/"))
+            {
+                Command(message.Chat.Id, message.Text).Wait();
+            }
             else if (message.Text.Equals("Удалить все задачи"))
             {
                 Users User = Users.Find(x => x.IdUser == message.Chat.Id);
-                if (User == null) SendMessage(message.Chat.Id, 4);
-                else if (User.Events.Count == 0) SendMessage(User.IdUser, 4);
+                if (User == null || User.Events.Count == 0)
+                    SendMessage(message.Chat.Id, 4).Wait();
                 else
                 {
                     User.Events = new List<Events>();
-                    SendMessage(User.IdUser, 6);
+                    SendMessage(User.IdUser, 6).Wait();
                 }
             }
             else
@@ -140,25 +166,31 @@ namespace pr_9_permilko
                     User = new Users(message.Chat.Id);
                     Users.Add(User);
                 }
+
                 string[] Info = message.Text.Split('\n');
                 if (Info.Length < 2)
                 {
-                    SendMessage(message.Chat.Id, 2);
+                    SendMessage(message.Chat.Id, 2).Wait();
                     return;
                 }
+
                 DateTime Time;
                 if (CheckFormatDateTime(Info[0], out Time) == false)
                 {
-                    SendMessage(message.Chat.Id, 2);
+                    SendMessage(message.Chat.Id, 2).Wait();
                     return;
                 }
-                if (Time < DateTime.Now) SendMessage(message.Chat.Id, 3);
-                User.Events.Add(new Events(
-                    Time,
-                    message.Text.Replace(Time.ToString("HH:mm dd.MM.yyyy") + "\n", "")));
+
+                if (Time < DateTime.Now)
+                    SendMessage(message.Chat.Id, 3).Wait();
+                else
+                {
+                    User.Events.Add(new Events(
+                        Time,
+                        message.Text.Replace(Time.ToString("HH:mm dd.MM.yyyy") + "\n", "")));
+                }
             }
         }
-
         private async Task HandleUpdateAsync(
             ITelegramBotClient client,
             Update update,
@@ -170,9 +202,15 @@ namespace pr_9_permilko
             {
                 CallbackQuery query = update.CallbackQuery;
                 Users User = Users.Find(x => x.IdUser == query.Message.Chat.Id);
-                Events Event = User.Events.Find(x => x.Message == query.Data);
-                User.Events.Remove(Event);
-                SendMessage(query.Message.Chat.Id, 5);
+                if (User != null)
+                {
+                    Events Event = User.Events.Find(x => x.Message == query.Data);
+                    if (Event != null)
+                    {
+                        User.Events.Remove(Event);
+                        await SendMessage(query.Message.Chat.Id, 5);
+                    }
+                }
             }
         }
         private async Task HandleErrorAsync(
@@ -183,32 +221,22 @@ namespace pr_9_permilko
         {
             Console.WriteLine("Ошибка: " + exception.Message);
         }
-
         public async void Tick(object obj)
         {
             string TimeNow = DateTime.Now.ToString("HH:mm dd.MM.yyyy");
             foreach (Users User in Users)
-                for (int i = 0; i < User.Events.Count; i++)
+            {
+                for (int i = User.Events.Count - 1; i >= 0; i--)
                 {
-                    if (User.Events[i].Time.ToString("HH:mm dd.MM.yyyy") != TimeNow) continue;
-                    await TelegramBotClient.SendMessage(
-                        User.IdUser,
-                        "Напоминание: " + User.Events[i].Message ); 
-                    User.Events.Remove(User.Events[i]);
+                    if (User.Events[i].Time.ToString("HH:mm dd.MM.yyyy") == TimeNow)
+                    {
+                        await TelegramBotClient.SendMessage(
+                            User.IdUser,
+                            "Напоминание: " + User.Events[i].Message);
+                        User.Events.RemoveAt(i);
+                    }
                 }
-        }
-
-        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-        {  
-            TelegramBotClient = new TelegramBotClient(Token);
-            TelegramBotClient.StartReceiving(
-                HandleUpdateAsync,
-                HandleErrorAsync,
-                null,
-                new CancellationTokenSource().Token
-            );
-            TimerCallback TimerCalback = new TimerCallback(Tick);
-            Timer = new Timer(TimerCalback, 0, 0, 60 * 1000);
+            }
         }
     }
 }
